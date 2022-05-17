@@ -1,5 +1,11 @@
 # hardhat
 
+## 2.9.6
+
+### Patch Changes
+
+- fde08e0c: Updates `node` task to terminate when the server closes.
+
 ## 2.9.5
 
 ### Patch Changes
