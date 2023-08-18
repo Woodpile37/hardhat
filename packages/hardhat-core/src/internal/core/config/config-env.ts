@@ -4,6 +4,7 @@ import {
   ConfigurableTaskDefinition,
   EnvironmentExtender,
   ExperimentalHardhatNetworkMessageTraceHook,
+  ProviderExtender,
   TaskArguments,
 } from "../../../types";
 import { HardhatContext } from "../../context";
@@ -19,10 +20,10 @@ import * as argumentTypes from "../params/argumentTypes";
  * @param action The task's action.
  * @returns A task definition.
  */
-export function task<ArgsT extends TaskArguments>(
+export function task<TaskArgumentsT extends TaskArguments>(
   name: string,
   description?: string,
-  action?: ActionType<ArgsT>
+  action?: ActionType<TaskArgumentsT>
 ): ConfigurableTaskDefinition;
 
 /**
@@ -36,15 +37,15 @@ export function task<ArgsT extends TaskArguments>(
  *
  * @returns A task definition.
  */
-export function task<ArgsT extends TaskArguments>(
+export function task<TaskArgumentsT extends TaskArguments>(
   name: string,
-  action: ActionType<ArgsT>
+  action: ActionType<TaskArgumentsT>
 ): ConfigurableTaskDefinition;
 
-export function task<ArgsT extends TaskArguments>(
+export function task<TaskArgumentsT extends TaskArguments>(
   name: string,
-  descriptionOrAction?: string | ActionType<ArgsT>,
-  action?: ActionType<ArgsT>
+  descriptionOrAction?: string | ActionType<TaskArgumentsT>,
+  action?: ActionType<TaskArgumentsT>
 ): ConfigurableTaskDefinition {
   const ctx = HardhatContext.getHardhatContext();
   const dsl = ctx.tasksDSL;
@@ -71,10 +72,10 @@ export function task<ArgsT extends TaskArguments>(
  * @param action The task's action.
  * @returns A task definition.
  */
-export function subtask<ArgsT extends TaskArguments>(
+export function subtask<TaskArgumentsT extends TaskArguments>(
   name: string,
   description?: string,
-  action?: ActionType<ArgsT>
+  action?: ActionType<TaskArgumentsT>
 ): ConfigurableTaskDefinition;
 
 /**
@@ -88,15 +89,15 @@ export function subtask<ArgsT extends TaskArguments>(
  * @param action The task's action.
  * @returns A task definition.
  */
-export function subtask<ArgsT extends TaskArguments>(
+export function subtask<TaskArgumentsT extends TaskArguments>(
   name: string,
-  action: ActionType<ArgsT>
+  action: ActionType<TaskArgumentsT>
 ): ConfigurableTaskDefinition;
 
-export function subtask<ArgsT extends TaskArguments>(
+export function subtask<TaskArgumentsT extends TaskArguments>(
   name: string,
-  descriptionOrAction?: string | ActionType<ArgsT>,
-  action?: ActionType<ArgsT>
+  descriptionOrAction?: string | ActionType<TaskArgumentsT>,
+  action?: ActionType<TaskArgumentsT>
 ): ConfigurableTaskDefinition {
   const ctx = HardhatContext.getHardhatContext();
   const dsl = ctx.tasksDSL;
@@ -126,13 +127,31 @@ export const types = argumentTypes;
  */
 export function extendEnvironment(extender: EnvironmentExtender) {
   const ctx = HardhatContext.getHardhatContext();
-  const extenderManager = ctx.extendersManager;
-  extenderManager.add(extender);
+  ctx.environmentExtenders.push(extender);
 }
 
+/**
+ * Register a config extender what will be run after the
+ * Hardhat Runtime Environment is initialized.
+ *
+ * @param extender A function that receives the resolved config
+ * to be modified and the config provided by the user
+ */
 export function extendConfig(extender: ConfigExtender) {
   const ctx = HardhatContext.getHardhatContext();
   ctx.configExtenders.push(extender);
+}
+
+/**
+ * Register a provider extender what will be run after the
+ * Hardhat Runtime Environment is initialized.
+ *
+ * @param extender A function that receives the current provider
+ * and returns a new one.
+ */
+export function extendProvider(extender: ProviderExtender) {
+  const ctx = HardhatContext.getHardhatContext();
+  ctx.providerExtenders.push(extender);
 }
 
 // NOTE: This is experimental and will be removed. Please contact our team

@@ -1,5 +1,7 @@
 import { AssertionError, expect } from "chai";
 import { ProviderError } from "hardhat/internal/core/providers/errors";
+import path from "path";
+import util from "util";
 
 import {
   runSuccessfulAsserts,
@@ -8,7 +10,8 @@ import {
   useEnvironmentWithNode,
 } from "../helpers";
 
-import "../../src";
+import "../../src/internal/add-chai-matchers";
+import { MatchersContract } from "../contracts";
 
 describe("INTEGRATION: Reverted without reason", function () {
   describe("with the in-process hardhat network", function () {
@@ -25,9 +28,12 @@ describe("INTEGRATION: Reverted without reason", function () {
 
   function runTests() {
     // deploy Matchers contract before each test
-    let matchers: any;
+    let matchers: MatchersContract;
     beforeEach("deploy matchers contract", async function () {
-      const Matchers = await this.hre.ethers.getContractFactory("Matchers");
+      const Matchers = await this.hre.ethers.getContractFactory<
+        [],
+        MatchersContract
+      >("Matchers");
       matchers = await Matchers.deploy();
     });
 
@@ -52,7 +58,9 @@ describe("INTEGRATION: Reverted without reason", function () {
       });
     });
 
-    describe("calling a method that reverts without a reason", function () {
+    // depends on a bug being fixed on ethers.js
+    // see https://github.com/NomicFoundation/hardhat/issues/3446
+    describe.skip("calling a method that reverts without a reason", function () {
       it("successful asserts", async function () {
         await runSuccessfulAsserts({
           matchers,
@@ -151,12 +159,15 @@ describe("INTEGRATION: Reverted without reason", function () {
           randomPrivateKey,
           this.hre.ethers.provider
         );
+        const matchersFromSenderWithoutFunds = matchers.connect(
+          signer
+        ) as MatchersContract;
 
         // this transaction will fail because of lack of funds, not because of a
         // revert
         await expect(
           expect(
-            matchers.connect(signer).revertsWithoutReason({
+            matchersFromSenderWithoutFunds.revertsWithoutReason({
               gasLimit: 1_000_000,
             })
           ).to.not.be.revertedWithoutReason()
@@ -164,6 +175,29 @@ describe("INTEGRATION: Reverted without reason", function () {
           ProviderError,
           "sender doesn't have enough funds to send tx"
         );
+      });
+    });
+
+    describe("stack traces", function () {
+      // smoke test for stack traces
+      it("includes test file", async function () {
+        try {
+          await expect(
+            matchers.revertsWithoutReason()
+          ).to.not.be.revertedWithoutReason();
+        } catch (e: any) {
+          const errorString = util.inspect(e);
+          expect(errorString).to.include(
+            "Expected transaction NOT to be reverted without a reason, but it was"
+          );
+          expect(errorString).to.include(
+            path.join("test", "reverted", "revertedWithoutReason.ts")
+          );
+
+          return;
+        }
+
+        expect.fail("Expected an exception but none was thrown");
       });
     });
   }

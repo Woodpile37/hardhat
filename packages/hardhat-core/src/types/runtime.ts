@@ -1,6 +1,6 @@
 import { Artifacts } from "./artifacts";
 import { HardhatConfig, HardhatUserConfig, NetworkConfig } from "./config";
-import { EthereumProvider } from "./provider";
+import { EIP1193Provider, EthereumProvider } from "./provider";
 
 /**
  * This class is used to dynamically validate task's argument types.
@@ -146,15 +146,22 @@ export interface TaskDefinition extends ConfigurableTaskDefinition {
  */
 export type TaskArguments = any;
 
-export interface RunSuperFunction<ArgT extends TaskArguments> {
-  (taskArguments?: ArgT): Promise<any>;
+export interface SubtaskArguments {
+  [subtaskName: string]: TaskArguments;
+}
+
+export interface RunSuperFunction<TaskArgumentsT extends TaskArguments> {
+  (
+    taskArguments?: TaskArgumentsT,
+    subtaskArguments?: SubtaskArguments
+  ): Promise<any>;
   isDefined: boolean;
 }
 
-export type ActionType<ArgsT extends TaskArguments> = (
-  taskArgs: ArgsT,
+export type ActionType<TaskArgumentsT extends TaskArguments> = (
+  taskArgs: TaskArgumentsT,
   env: HardhatRuntimeEnvironment,
-  runSuper: RunSuperFunction<ArgsT>
+  runSuper: RunSuperFunction<TaskArgumentsT>
 ) => Promise<any>;
 
 export interface HardhatArguments {
@@ -167,6 +174,8 @@ export interface HardhatArguments {
   verbose: boolean;
   maxMemory?: number;
   tsconfig?: string;
+  flamegraph?: boolean;
+  typecheck?: boolean;
 }
 
 export type HardhatParamDefinitions = {
@@ -181,7 +190,8 @@ export interface TasksMap {
 
 export type RunTaskFunction = (
   name: string,
-  taskArguments?: TaskArguments
+  taskArguments?: TaskArguments,
+  subtaskArguments?: SubtaskArguments
 ) => Promise<any>;
 
 export interface HardhatRuntimeEnvironment {
@@ -192,6 +202,7 @@ export interface HardhatRuntimeEnvironment {
   readonly run: RunTaskFunction;
   readonly network: Network;
   readonly artifacts: Artifacts;
+  readonly version: string;
 }
 
 export interface Network {
@@ -205,3 +216,13 @@ export interface Network {
  * modify its properties or add new ones.
  */
 export type EnvironmentExtender = (env: HardhatRuntimeEnvironment) => void;
+
+/**
+ * A function that receives a provider, crafts and returns a new one.
+ * Adding and modifying the current provider is preferred over ignoring it and returning a new instance.
+ */
+export type ProviderExtender = (
+  provider: EIP1193Provider,
+  config: HardhatConfig,
+  network: string
+) => EIP1193Provider | Promise<EIP1193Provider>;

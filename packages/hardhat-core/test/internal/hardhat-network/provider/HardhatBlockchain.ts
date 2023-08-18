@@ -1,9 +1,13 @@
-import { Block } from "@ethereumjs/block";
-import Common from "@ethereumjs/common";
+import { Block } from "@nomicfoundation/ethereumjs-block";
+import { Common } from "@nomicfoundation/ethereumjs-common";
+import {
+  BufferLike,
+  bufferToBigInt,
+  zeros,
+} from "@nomicfoundation/ethereumjs-util";
 import { assert } from "chai";
-import { BN, BufferLike, zeros } from "ethereumjs-util";
 
-import { randomHashBuffer } from "../../../../src/internal/hardhat-network/provider/fork/random";
+import { randomHashBuffer } from "../../../../src/internal/hardhat-network/provider/utils/random";
 import { HardhatBlockchain } from "../../../../src/internal/hardhat-network/provider/HardhatBlockchain";
 import {
   createTestLog,
@@ -16,11 +20,16 @@ describe("HardhatBlockchain", () => {
   let blocks: Block[];
 
   function createBlock(number: number, _difficulty?: BufferLike) {
-    const difficulty = new BN(_difficulty as Buffer);
+    const difficulty = bufferToBigInt(_difficulty as Buffer);
     const parentHash = number === 0 ? zeros(32) : blocks[number - 1].hash();
-    const newBlock = Block.fromBlockData({
-      header: { number, difficulty, parentHash },
-    });
+    const newBlock = Block.fromBlockData(
+      {
+        header: { number, difficulty, parentHash },
+      },
+      {
+        skipConsensusFormatValidation: true,
+      }
+    );
     blocks.push(newBlock);
     return newBlock;
   }
@@ -63,16 +72,19 @@ describe("HardhatBlockchain", () => {
       assert.equal(await blockchain.getBlock(1), one);
     });
 
-    it("can get existing block by BN", async () => {
+    it("can get existing block by bigint", async () => {
       await blockchain.addBlock(createBlock(0));
       const one = createBlock(1);
       await blockchain.addBlock(one);
-      assert.equal(await blockchain.getBlock(new BN(1)), one);
+      assert.equal(await blockchain.getBlock(1n), one);
     });
 
-    it("returns undefined non-existent block", async () => {
-      assert.equal(await blockchain.getBlock(0), undefined);
-      assert.equal(await blockchain.getBlock(randomHashBuffer()), undefined);
+    it("throws error for non-existent block", async () => {
+      await assert.isRejected(blockchain.getBlock(0), "Block not found");
+      await assert.isRejected(
+        blockchain.getBlock(randomHashBuffer()),
+        "Block not found"
+      );
     });
   });
 
@@ -143,9 +155,18 @@ describe("HardhatBlockchain", () => {
 
       blockchain.deleteBlock(blockOne.hash());
 
-      assert.equal(await blockchain.getBlock(blockOne.hash()), undefined);
-      assert.equal(await blockchain.getBlock(blockTwo.hash()), undefined);
-      assert.equal(await blockchain.getBlock(blockThree.hash()), undefined);
+      await assert.isRejected(
+        blockchain.getBlock(blockOne.hash()),
+        "Block not found"
+      );
+      await assert.isRejected(
+        blockchain.getBlock(blockTwo.hash()),
+        "Block not found"
+      );
+      await assert.isRejected(
+        blockchain.getBlock(blockThree.hash()),
+        "Block not found"
+      );
     });
 
     it("updates the latest block number", async () => {
@@ -197,8 +218,14 @@ describe("HardhatBlockchain", () => {
       blockchain.deleteLaterBlocks(blockOne);
 
       assert.equal(await blockchain.getBlock(blockOne.hash()), blockOne);
-      assert.equal(await blockchain.getBlock(blockTwo.hash()), undefined);
-      assert.equal(await blockchain.getBlock(blockThree.hash()), undefined);
+      await assert.isRejected(
+        blockchain.getBlock(blockTwo.hash()),
+        "Block not found"
+      );
+      await assert.isRejected(
+        blockchain.getBlock(blockThree.hash()),
+        "Block not found"
+      );
     });
 
     it("throws if given block is not present in blockchain", async () => {
@@ -240,7 +267,7 @@ describe("HardhatBlockchain", () => {
       const genesis = createBlock(0, 1000);
       await blockchain.addBlock(genesis);
       const difficulty = await blockchain.getTotalDifficulty(genesis.hash());
-      assert.equal(difficulty.toNumber(), 1000);
+      assert.equal(difficulty, 1000n);
     });
 
     it("can get total difficulty of the second block", async () => {
@@ -250,7 +277,7 @@ describe("HardhatBlockchain", () => {
       await blockchain.addBlock(second);
 
       const difficulty = await blockchain.getTotalDifficulty(second.hash());
-      assert.equal(difficulty.toNumber(), 3000);
+      assert.equal(difficulty, 3000n);
     });
 
     it("does not return total difficulty of a deleted block", async () => {
@@ -262,10 +289,7 @@ describe("HardhatBlockchain", () => {
 
       blockchain.deleteLaterBlocks(blockOne);
 
-      assert.equal(
-        (await blockchain.getTotalDifficulty(blockOne.hash())).toNumber(),
-        1000
-      );
+      assert.equal(await blockchain.getTotalDifficulty(blockOne.hash()), 1000n);
       await assert.isRejected(
         blockchain.getTotalDifficulty(blockTwo.hash()),
         Error,
@@ -421,18 +445,18 @@ describe("HardhatBlockchain", () => {
   describe("getLogs", () => {
     it("works like BlockchainData.getLogs", async () => {
       const block1 = createBlock(0);
-      const log1 = createTestLog(0);
-      const log2 = createTestLog(0);
+      const log1 = createTestLog(0n);
+      const log2 = createTestLog(0n);
       const tx1 = createTestTransaction();
       const receipt1 = createTestReceipt(tx1, [log1, log2]);
       const tx2 = createTestTransaction();
-      const log3 = createTestLog(0);
+      const log3 = createTestLog(0n);
       const receipt2 = createTestReceipt(tx2, [log3]);
       block1.transactions.push(tx1, tx2);
 
       const block2 = createBlock(1);
       const tx3 = createTestTransaction();
-      const log4 = createTestLog(1);
+      const log4 = createTestLog(1n);
       const receipt3 = createTestReceipt(tx3, [log4]);
       block2.transactions.push(tx3);
 
@@ -441,8 +465,8 @@ describe("HardhatBlockchain", () => {
       blockchain.addTransactionReceipts([receipt1, receipt2, receipt3]);
 
       const logs = await blockchain.getLogs({
-        fromBlock: new BN(0),
-        toBlock: new BN(0),
+        fromBlock: 0n,
+        toBlock: 0n,
         addresses: [],
         normalizedTopics: [],
       });

@@ -9,6 +9,7 @@ module.exports = {
   plugins: [
     "@nomiclabs/eslint-plugin-hardhat-internal-rules",
     "eslint-plugin-import",
+    "no-only-tests",
     "@typescript-eslint",
   ],
   rules: {
@@ -74,9 +75,15 @@ module.exports = {
         trailingUnderscore: "allow",
       },
       {
-        selector: "classProperty",
+        selector: ["classProperty"],
         format: ["camelCase", "UPPER_CASE"],
         leadingUnderscore: "allow",
+      },
+      {
+        selector: ["classProperty"],
+        modifiers: ["private"],
+        format: ["camelCase", "UPPER_CASE"],
+        leadingUnderscore: "require",
       },
       {
         selector: "enumMember",
@@ -89,7 +96,11 @@ module.exports = {
         leadingUnderscore: "require",
       },
       {
-        selector: ["objectLiteralProperty", "objectLiteralMethod"],
+        selector: ["objectLiteralProperty"],
+        format: null,
+      },
+      {
+        selector: ["objectLiteralMethod"],
         format: ["camelCase", "PascalCase", "snake_case", "UPPER_CASE"],
         leadingUnderscore: "allow",
       },
@@ -132,16 +143,19 @@ module.exports = {
     "@typescript-eslint/prefer-function-type": "error",
     "@typescript-eslint/prefer-namespace-keyword": "error",
     "@typescript-eslint/restrict-plus-operands": "error",
-    "@typescript-eslint/restrict-template-expressions": ["error", {
-      allowAny: true,
-    }],
+    "@typescript-eslint/restrict-template-expressions": [
+      "error",
+      {
+        allowAny: true,
+      },
+    ],
     "@typescript-eslint/strict-boolean-expressions": [
       "error",
       {
         allowString: false,
         allowNumber: false,
         allowNullableObject: false,
-        allowAny: true,
+        allowAny: false,
       },
     ],
     "@typescript-eslint/triple-slash-reference": [
@@ -183,11 +197,12 @@ module.exports = {
     "no-cond-assign": "error",
     "no-debugger": "error",
     "no-duplicate-case": "error",
-    "no-duplicate-imports": "error",
+    "@typescript-eslint/no-duplicate-imports": "error",
     "no-eval": "error",
     "no-extra-bind": "error",
     "no-new-func": "error",
     "no-new-wrappers": "error",
+    "no-only-tests/no-only-tests": "error",
     "no-return-await": "off",
     "@typescript-eslint/return-await": "error",
     "no-sequences": "error",
@@ -213,8 +228,11 @@ module.exports = {
       },
     ],
     "use-isnan": "error",
-    "no-restricted-imports": ["error", {
-      patterns: ["hardhat/src", "@nomiclabs/*/src"]
-    }],
+    "no-restricted-imports": [
+      "error",
+      {
+        patterns: ["hardhat/src", "@nomiclabs/*/src"],
+      },
+    ],
   },
 };

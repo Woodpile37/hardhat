@@ -3,22 +3,22 @@ import type {
   BoundExperimentalHardhatNetworkMessageTraceHook,
   EIP1193Provider,
   EthereumProvider,
+  HardhatConfig,
   HardhatNetworkConfig,
   HDAccountsUserConfig,
   HttpNetworkAccountsUserConfig,
   HttpNetworkConfig,
-  HttpNetworkUserConfig,
   NetworkConfig,
-  ProjectPathsConfig,
+  ProviderExtender,
 } from "../../../types";
 
-import { HARDHAT_NETWORK_NAME } from "../../constants";
-import { ModulesLogger } from "../../hardhat-network/provider/modules/logger";
-import {
+import type {
   ForkConfig,
   MempoolOrder,
 } from "../../hardhat-network/provider/node-types";
-import { getForkCacheDirPath } from "../../hardhat-network/provider/utils/disk-cache";
+import type * as ModulesLoggerT from "../../hardhat-network/provider/modules/logger";
+import type * as DiskCacheT from "../../hardhat-network/provider/utils/disk-cache";
+import { HARDHAT_NETWORK_NAME } from "../../constants";
 import { parseDateString } from "../../util/date";
 
 import { normalizeHardhatNetworkAccountsConfig } from "./util";
@@ -47,14 +47,16 @@ function importProvider<ModuleT, ProviderNameT extends keyof ModuleT>(
   return mod[name];
 }
 
-export function createProvider(
+export async function createProvider(
+  config: HardhatConfig,
   networkName: string,
-  networkConfig: NetworkConfig,
-  paths?: ProjectPathsConfig,
   artifacts?: Artifacts,
-  experimentalHardhatNetworkMessageTraceHooks: BoundExperimentalHardhatNetworkMessageTraceHook[] = []
-): EthereumProvider {
+  experimentalHardhatNetworkMessageTraceHooks: BoundExperimentalHardhatNetworkMessageTraceHook[] = [],
+  extenders: ProviderExtender[] = []
+): Promise<EthereumProvider> {
   let eip1193Provider: EIP1193Provider;
+  const networkConfig = config.networks[networkName];
+  const paths = config.paths;
 
   if (networkName === HARDHAT_NETWORK_NAME) {
     const hardhatNetConfig = networkConfig as HardhatNetworkConfig;
@@ -73,6 +75,7 @@ export function createProvider(
       forkConfig = {
         jsonRpcUrl: hardhatNetConfig.forking?.url,
         blockNumber: hardhatNetConfig.forking?.blockNumber,
+        httpHeaders: hardhatNetConfig.forking.httpHeaders,
       };
     }
 
@@ -80,39 +83,49 @@ export function createProvider(
       hardhatNetConfig.accounts
     );
 
+    const { ModulesLogger } =
+      require("../../hardhat-network/provider/modules/logger") as typeof ModulesLoggerT;
+    const { getForkCacheDirPath } =
+      require("../../hardhat-network/provider/utils/disk-cache") as typeof DiskCacheT;
+
     eip1193Provider = new HardhatNetworkProvider(
-      hardhatNetConfig.hardfork,
-      HARDHAT_NETWORK_NAME,
-      hardhatNetConfig.chainId,
-      hardhatNetConfig.chainId,
-      hardhatNetConfig.blockGasLimit,
-      hardhatNetConfig.initialBaseFeePerGas,
-      hardhatNetConfig.minGasPrice,
-      hardhatNetConfig.throwOnTransactionFailures,
-      hardhatNetConfig.throwOnCallFailures,
-      hardhatNetConfig.mining.auto,
-      hardhatNetConfig.mining.interval,
-      // This cast is valid because of the config validation and resolution
-      hardhatNetConfig.mining.mempool.order as MempoolOrder,
-      hardhatNetConfig.chains,
+      {
+        chainId: hardhatNetConfig.chainId,
+        networkId: hardhatNetConfig.chainId,
+        hardfork: hardhatNetConfig.hardfork,
+        blockGasLimit: hardhatNetConfig.blockGasLimit,
+        initialBaseFeePerGas: hardhatNetConfig.initialBaseFeePerGas,
+        minGasPrice: hardhatNetConfig.minGasPrice,
+        throwOnTransactionFailures: hardhatNetConfig.throwOnTransactionFailures,
+        throwOnCallFailures: hardhatNetConfig.throwOnCallFailures,
+        automine: hardhatNetConfig.mining.auto,
+        intervalMining: hardhatNetConfig.mining.interval,
+        // This cast is valid because of the config validation and resolution
+        mempoolOrder: hardhatNetConfig.mining.mempool.order as MempoolOrder,
+        chains: hardhatNetConfig.chains,
+        coinbase: hardhatNetConfig.coinbase,
+        genesisAccounts: accounts,
+        allowUnlimitedContractSize: hardhatNetConfig.allowUnlimitedContractSize,
+        allowBlocksWithSameTimestamp:
+          hardhatNetConfig.allowBlocksWithSameTimestamp ?? false,
+        initialDate:
+          hardhatNetConfig.initialDate !== undefined
+            ? parseDateString(hardhatNetConfig.initialDate)
+            : undefined,
+        experimentalHardhatNetworkMessageTraceHooks,
+        forkConfig,
+        forkCachePath:
+          paths !== undefined ? getForkCacheDirPath(paths) : undefined,
+      },
       new ModulesLogger(hardhatNetConfig.loggingEnabled),
-      accounts,
-      artifacts,
-      hardhatNetConfig.allowUnlimitedContractSize,
-      hardhatNetConfig.initialDate !== undefined
-        ? parseDateString(hardhatNetConfig.initialDate)
-        : undefined,
-      experimentalHardhatNetworkMessageTraceHooks,
-      forkConfig,
-      paths !== undefined ? getForkCacheDirPath(paths) : undefined,
-      hardhatNetConfig.coinbase
+      artifacts
     );
   } else {
     const HttpProvider = importProvider<
       typeof import("./http"),
       "HttpProvider"
     >("./http", "HttpProvider");
-    const httpNetConfig = networkConfig as HttpNetworkUserConfig;
+    const httpNetConfig = networkConfig as HttpNetworkConfig;
 
     eip1193Provider = new HttpProvider(
       httpNetConfig.url!,
@@ -122,7 +135,17 @@ export function createProvider(
     );
   }
 
-  const wrappedProvider = applyProviderWrappers(eip1193Provider, networkConfig);
+  let wrappedProvider = eip1193Provider;
+
+  for (const extender of extenders) {
+    wrappedProvider = await extender(wrappedProvider, config, networkName);
+  }
+
+  wrappedProvider = applyProviderWrappers(
+    wrappedProvider,
+    networkConfig,
+    extenders
+  );
 
   const BackwardsCompatibilityProviderAdapter = importProvider<
     typeof import("./backwards-compatibility"),
@@ -134,7 +157,8 @@ export function createProvider(
 
 export function applyProviderWrappers(
   provider: EIP1193Provider,
-  netConfig: Partial<NetworkConfig>
+  netConfig: Partial<NetworkConfig>,
+  extenders: ProviderExtender[]
 ): EIP1193Provider {
   // These dependencies are lazy-loaded because they are really big.
   const LocalAccountsProvider = importProvider<
@@ -170,11 +194,6 @@ export function applyProviderWrappers(
     typeof import("./gas-providers"),
     "FixedGasPriceProvider"
   >("./gas-providers", "FixedGasPriceProvider");
-  const GanacheGasMultiplierProvider = importProvider<
-    typeof import("./gas-providers"),
-    "GanacheGasMultiplierProvider"
-  >("./gas-providers", "GanacheGasMultiplierProvider");
-
   const ChainIdValidatorProvider = importProvider<
     typeof import("./chainId"),
     "ChainIdValidatorProvider"
@@ -197,10 +216,6 @@ export function applyProviderWrappers(
     }
 
     // TODO: Add some extension mechanism for account plugins here
-
-    if (typeof netConfig.gas !== "number") {
-      provider = new GanacheGasMultiplierProvider(provider);
-    }
   }
 
   if (netConfig.from !== undefined) {
@@ -225,8 +240,10 @@ export function applyProviderWrappers(
     // fields, as the missing ones will be resolved there.
     //
     // Hardhat Network handles this in a more performant way, so we don't use
-    // the AutomaticGasPriceProvider for it.
-    if (isResolvedHttpNetworkConfig(netConfig)) {
+    // the AutomaticGasPriceProvider for it unless there are provider extenders.
+    // The reason for this is that some extenders (like hardhat-ledger's) might
+    // do the signing themselves, and that needs the gas price to be set.
+    if (isResolvedHttpNetworkConfig(netConfig) || extenders.length > 0) {
       provider = new AutomaticGasPriceProvider(provider);
     }
   } else {

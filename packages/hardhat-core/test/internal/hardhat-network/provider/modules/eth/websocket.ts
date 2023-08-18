@@ -1,6 +1,8 @@
 import { assert } from "chai";
 import { ethers } from "ethers";
 import WebSocket from "ws";
+import { rpcQuantityToBigInt } from "../../../../../../src/internal/core/jsonrpc/types/base-types";
+import { JsonRpcRequest, JsonRpcResponse } from "../../../../../../src/types";
 
 import { workaroundWindowsCiFailures } from "../../../../../utils/workaround-windows-ci-failures";
 import { EXAMPLE_CONTRACT } from "../../../helpers/contracts";
@@ -118,6 +120,58 @@ describe("Eth module", function () {
           assert.equal(newLogEvent.params.subscription, subscription);
         });
 
+        it("Supports single and batched requests", async function () {
+          const { result: accounts } = await sendMethod("eth_accounts");
+          const [acc1, acc2] = accounts;
+
+          // send a single request and validate the result
+          const requestId1 = Math.floor(1000 * Math.random());
+          const balanceResponse1 = await sendJson({
+            jsonrpc: "2.0",
+            id: requestId1,
+            method: "eth_getBalance",
+            params: [acc1],
+          });
+
+          assert.equal(balanceResponse1.id, requestId1);
+
+          const balanceAccount1 = rpcQuantityToBigInt(balanceResponse1.result);
+          assert.isTrue(balanceAccount1 > 0);
+
+          // send batched requests and validate the results
+          const requestId2 = Math.floor(1000 * Math.random());
+          const requestId3 = Math.floor(1000 * Math.random());
+          const balanceResponses = await sendJson([
+            {
+              jsonrpc: "2.0",
+              id: requestId2,
+              method: "eth_getBalance",
+              params: [acc1],
+            },
+            {
+              jsonrpc: "2.0",
+              id: requestId3,
+              method: "eth_getBalance",
+              params: [acc2],
+            },
+          ]);
+
+          const balanceResponse2 = balanceResponses.find(
+            (x) => x.id === requestId2
+          )!;
+          const balanceResponse3 = balanceResponses.find(
+            (x) => x.id === requestId3
+          )!;
+
+          // the first request in the batch uses the same address as the one in
+          // the single request, so the results should match
+          assert.equal(balanceResponse2.result, balanceResponse1.result);
+
+          // it should return a valid value for the second account too
+          const balanceAccount2 = rpcQuantityToBigInt(balanceResponse3.result);
+          assert.isTrue(balanceAccount2 > 0);
+        });
+
         async function subscribeTo(event: string, ...extraParams: any[]) {
           const subscriptionPromise = new Promise<string>((resolve) => {
             const listener: any = (message: any) => {
@@ -172,6 +226,34 @@ describe("Eth module", function () {
             })
           );
 
+          const result = await resultPromise;
+
+          return result;
+        }
+
+        async function sendJson<
+          TBody extends TReq | TReq[],
+          TReq extends JsonRpcRequest,
+          TResp extends JsonRpcResponse
+        >(body: TBody): Promise<TBody extends TReq[] ? TResp[] : TResp> {
+          const resultPromise = new Promise<any>((resolve) => {
+            const listener: any = (message: any) => {
+              const parsedMessage = JSON.parse(message.toString());
+              const receivedId = Array.isArray(parsedMessage)
+                ? parsedMessage[0]?.id
+                : parsedMessage.id;
+              const sentId = Array.isArray(body) ? body[0]?.id : body.id;
+
+              if (receivedId === sentId) {
+                ws.removeListener("message", listener);
+                resolve(parsedMessage);
+              }
+            };
+
+            ws.on("message", listener);
+          });
+
+          ws.send(JSON.stringify(body));
           const result = await resultPromise;
 
           return result;
@@ -260,14 +342,12 @@ describe("Eth module", function () {
       });
 
       describe("ethers.WebSocketProvider", function () {
-        let provider: ethers.providers.WebSocketProvider;
+        let provider: ethers.WebSocketProvider;
 
         beforeEach(async function () {
           if (this.serverInfo !== undefined) {
             const { address, port } = this.serverInfo;
-            provider = new ethers.providers.WebSocketProvider(
-              `ws://${address}:${port}`
-            );
+            provider = new ethers.WebSocketProvider(`ws://${address}:${port}`);
           } else {
             this.skip();
           }
@@ -293,7 +373,7 @@ describe("Eth module", function () {
           );
           await sleep(100);
 
-          const signer = provider.getSigner();
+          const signer = await provider.getSigner();
           await signer.sendTransaction({
             to: await signer.getAddress(),
           });
@@ -302,8 +382,8 @@ describe("Eth module", function () {
         });
 
         it("contract events work", async function () {
-          const signer = provider.getSigner();
-          const Factory = new ethers.ContractFactory(
+          const signer = await provider.getSigner();
+          const Factory = new ethers.ContractFactory<[], ethers.Contract>(
             EXAMPLE_CONTRACT.abi,
             EXAMPLE_CONTRACT.bytecode,
             signer

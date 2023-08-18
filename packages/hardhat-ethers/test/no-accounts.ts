@@ -2,9 +2,9 @@ import { assert } from "chai";
 import { TASK_COMPILE } from "hardhat/builtin-tasks/task-names";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 
-import { SignerWithAddress } from "../src/signers";
+import { HardhatEthersSigner } from "../src/signers";
 
-import { useEnvironment } from "./helpers";
+import { useEnvironment } from "./environment";
 
 describe("hardhat-ethers plugin", function () {
   describe("hardhat network with no accounts", function () {
@@ -18,18 +18,13 @@ describe("hardhat-ethers plugin", function () {
     });
 
     describe("getContractAt", function () {
-      let signerAddress: string;
+      const signerAddress = "0x1010101010101010101010101010101010101010";
 
       beforeEach(async function () {
-        // We need some ether to send transactions so we mine a block and use the coinbase account to send them
-        // TODO: being able to send transactions with gasPrice 0 would work too, but currently can't be done.
-        await this.env.network.provider.request({
-          method: "evm_mine",
-          params: [],
-        });
-
-        const { miner } = await this.env.ethers.provider.getBlock("latest");
-        signerAddress = miner;
+        await this.env.network.provider.send("hardhat_setBalance", [
+          signerAddress,
+          "0x1000000000000000000",
+        ]);
 
         await this.env.run(TASK_COMPILE, { quiet: true });
       });
@@ -38,23 +33,36 @@ describe("hardhat-ethers plugin", function () {
         it("Should return an instance of a contract with a read-only provider", async function () {
           const receipt = await deployGreeter(this.env, signerAddress);
 
+          if (receipt === null) {
+            assert.fail("receipt shoudn't be null");
+          }
+          if (receipt.contractAddress === null) {
+            assert.fail("receipt.contractAddress shoudn't be null");
+          }
+
           const contract = await this.env.ethers.getContractAt(
             "Greeter",
             receipt.contractAddress
           );
 
-          assert.isDefined(contract.provider);
-          assert.isNotNull(contract.provider);
+          assert.isDefined(contract.runner);
+          assert.isNotNull(contract.runner);
 
-          const greeting = await contract.functions.greet();
+          const greeting = await contract.greet();
 
-          assert.equal(greeting, "Hi");
+          assert.strictEqual(greeting, "Hi");
         });
       });
 
       describe("with the abi and address", function () {
         it("Should return an instance of a contract with a read-only provider", async function () {
           const receipt = await deployGreeter(this.env, signerAddress);
+          if (receipt === null) {
+            assert.fail("receipt shoudn't be null");
+          }
+          if (receipt.contractAddress === null) {
+            assert.fail("receipt.contractAddress shoudn't be null");
+          }
 
           const signers = await this.env.ethers.getSigners();
           assert.isEmpty(signers);
@@ -68,12 +76,12 @@ describe("hardhat-ethers plugin", function () {
             receipt.contractAddress
           );
 
-          assert.isDefined(contract.provider);
-          assert.isNotNull(contract.provider);
+          assert.isDefined(contract.runner);
+          assert.isNotNull(contract.runner);
 
-          const greeting = await contract.functions.greet();
+          const greeting = await contract.greet();
 
-          assert.equal(greeting, "Hi");
+          assert.strictEqual(greeting, "Hi");
         });
       });
     });
@@ -86,8 +94,8 @@ describe("hardhat-ethers plugin", function () {
         assert.isTrue(signers.every((aSigner) => aSigner.address !== address));
 
         const signer = await this.env.ethers.getSigner(address);
-        assert.instanceOf(signer, SignerWithAddress);
-        assert.equal(signer.address, address);
+        assert.instanceOf(signer, HardhatEthersSigner);
+        assert.strictEqual(signer.address, address);
       });
     });
   });
@@ -98,7 +106,7 @@ async function deployGreeter(
   signerAddress: string
 ) {
   const Greeter = await hre.ethers.getContractFactory("Greeter");
-  const tx = Greeter.getDeployTransaction();
+  const tx = await Greeter.getDeployTransaction();
   tx.from = signerAddress;
 
   await hre.network.provider.request({
@@ -116,7 +124,10 @@ async function deployGreeter(
   });
   assert.isDefined(hre.ethers.provider);
   const receipt = await hre.ethers.provider.getTransactionReceipt(txHash);
-  assert.equal(receipt.status, 1, "The deployment transaction failed.");
+  if (receipt === null) {
+    assert.fail("receipt shoudn't be null");
+  }
+  assert.strictEqual(receipt.status, 1, "The deployment transaction failed.");
 
   return receipt;
 }

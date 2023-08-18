@@ -8,12 +8,9 @@ import { ERRORS } from "../core/errors-list";
 import { getEnvHardhatArguments } from "../core/params/env-variables";
 import { HARDHAT_PARAM_DEFINITIONS } from "../core/params/hardhat-params";
 import { Environment } from "../core/runtime-environment";
-import { applyWorkaround } from "../util/antlr-prototype-pollution-workaround";
 
 let ctx: HardhatContext;
 let env: HardhatRuntimeEnvironment;
-
-applyWorkaround();
 
 if (HardhatContext.isCreated()) {
   ctx = HardhatContext.getHardhatContext();
@@ -43,9 +40,10 @@ if (HardhatContext.isCreated()) {
     resolvedConfig,
     hardhatArguments,
     ctx.tasksDSL.getTaskDefinitions(),
-    ctx.extendersManager.getExtenders(),
+    ctx.environmentExtenders,
     ctx.experimentalHardhatNetworkMessageTraceHooks,
-    userConfig
+    userConfig,
+    ctx.providerExtenders
   );
 
   ctx.setHardhatRuntimeEnvironment(env);

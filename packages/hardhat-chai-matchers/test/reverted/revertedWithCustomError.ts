@@ -1,6 +1,7 @@
 import { AssertionError, expect } from "chai";
-import { BigNumber } from "ethers";
 import { ProviderError } from "hardhat/internal/core/providers/errors";
+import path from "path";
+import util from "util";
 
 import {
   runSuccessfulAsserts,
@@ -9,7 +10,9 @@ import {
   useEnvironmentWithNode,
 } from "../helpers";
 
-import "../../src";
+import "../../src/internal/add-chai-matchers";
+import { anyUint, anyValue } from "../../src/withArgs";
+import { MatchersContract } from "../contracts";
 
 describe("INTEGRATION: Reverted with custom error", function () {
   describe("with the in-process hardhat network", function () {
@@ -26,9 +29,12 @@ describe("INTEGRATION: Reverted with custom error", function () {
 
   function runTests() {
     // deploy Matchers contract before each test
-    let matchers: any;
+    let matchers: MatchersContract;
     beforeEach("deploy matchers contract", async function () {
-      const Matchers = await this.hre.ethers.getContractFactory("Matchers");
+      const Matchers = await this.hre.ethers.getContractFactory<
+        [],
+        MatchersContract
+      >("Matchers");
 
       matchers = await Matchers.deploy();
     });
@@ -87,7 +93,9 @@ describe("INTEGRATION: Reverted with custom error", function () {
         });
       });
 
-      it("failed asserts", async function () {
+      // depends on a bug being fixed on ethers.js
+      // see https://github.com/NomicFoundation/hardhat/issues/3446
+      it.skip("failed asserts", async function () {
         await runFailedAsserts({
           matchers,
           method: "revertsWithoutReason",
@@ -264,6 +272,17 @@ describe("INTEGRATION: Reverted with custom error", function () {
             )
             .withArgs(1, "bar")
         ).to.be.rejectedWith(AssertionError, "expected 'foo' to equal 'bar'");
+
+        await expect(
+          expect(matchers.revertWithCustomErrorWithUintAndString(1, "foo"))
+            .to.be.revertedWithCustomError(
+              matchers,
+              "CustomErrorWithUintAndString"
+            )
+            .withArgs(() => {
+              throw new Error("user-defined error");
+            }, "foo")
+        ).to.be.rejectedWith(Error, "user-defined error");
       });
 
       it("should check the length of the args", async function () {
@@ -301,6 +320,26 @@ describe("INTEGRATION: Reverted with custom error", function () {
         );
       });
 
+      it("should fail when the arrays don't have the same length", async function () {
+        await expect(
+          expect(matchers.revertWithCustomErrorWithPair(1, 2))
+            .to.be.revertedWithCustomError(matchers, "CustomErrorWithPair")
+            .withArgs([1])
+        ).to.be.rejectedWith(
+          AssertionError,
+          'Expected the 1st argument of the "CustomErrorWithPair" custom error to have 1 element, but it has 2'
+        );
+
+        await expect(
+          expect(matchers.revertWithCustomErrorWithPair(1, 2))
+            .to.be.revertedWithCustomError(matchers, "CustomErrorWithPair")
+            .withArgs([1, 2, 3])
+        ).to.be.rejectedWith(
+          AssertionError,
+          'Expected the 1st argument of the "CustomErrorWithPair" custom error to have 3 elements, but it has 2'
+        );
+      });
+
       it("Should fail when used with .not.", async function () {
         expect(() =>
           expect(matchers.revertWithSomeCustomError())
@@ -316,7 +355,7 @@ describe("INTEGRATION: Reverted with custom error", function () {
             .withArgs(1)
         ).to.throw(
           Error,
-          "withArgs called without a previous .emit or .revertedWithCustomError assertion"
+          "withArgs can only be used in combination with a previous .emit or .revertedWithCustomError assertion"
         );
       });
 
@@ -328,22 +367,36 @@ describe("INTEGRATION: Reverted with custom error", function () {
             .withArgs(1)
         ).to.throw(
           Error,
-          "withArgs called with both .emit and .revertedWithCustomError, these assertions cannot be combined"
+          "withArgs called with both .emit and .revertedWithCustomError, but these assertions cannot be combined"
         );
       });
 
-      it("should work with bigints and bignumbers", async function () {
+      it("should work with predicates", async function () {
         await expect(matchers.revertWithCustomErrorWithUint(1))
           .to.be.revertedWithCustomError(matchers, "CustomErrorWithUint")
-          .withArgs(BigInt(1));
+          .withArgs(anyValue);
+
+        await expect(
+          expect(matchers.revertWithCustomErrorWithUint(1))
+            .to.be.revertedWithCustomError(matchers, "CustomErrorWithUint")
+            .withArgs(() => false)
+        ).to.be.rejectedWith(
+          AssertionError,
+          "The predicate for custom error argument with index 0 returned false"
+        );
 
         await expect(matchers.revertWithCustomErrorWithUint(1))
           .to.be.revertedWithCustomError(matchers, "CustomErrorWithUint")
-          .withArgs(BigNumber.from(1));
+          .withArgs(anyUint);
 
-        await expect(matchers.revertWithCustomErrorWithPair(1, 2))
-          .to.be.revertedWithCustomError(matchers, "CustomErrorWithPair")
-          .withArgs([BigInt(1), BigNumber.from(2)]);
+        await expect(
+          expect(matchers.revertWithCustomErrorWithInt(-1))
+            .to.be.revertedWithCustomError(matchers, "CustomErrorWithInt")
+            .withArgs(anyUint)
+        ).to.be.rejectedWith(
+          AssertionError,
+          "The predicate for custom error argument with index 0 threw an AssertionError: anyUint expected its argument to be an unsigned integer, but it was negative, with value -1"
+        );
       });
     });
 
@@ -363,10 +416,7 @@ describe("INTEGRATION: Reverted with custom error", function () {
         expect(() =>
           // @ts-expect-error
           expect(hash).to.be.revertedWith(10)
-        ).to.throw(
-          TypeError,
-          "Expected a string as the expected reason string"
-        );
+        ).to.throw(TypeError, "Expected the revert reason to be a string");
       });
 
       it("the contract is not specified", async function () {
@@ -376,7 +426,7 @@ describe("INTEGRATION: Reverted with custom error", function () {
             .revertedWithCustomError("SomeCustomError")
         ).to.throw(
           TypeError,
-          "The first argument of .revertedWithCustomError has to be the contract that defines the custom error"
+          "The first argument of .revertedWithCustomError must be the contract that defines the custom error"
         );
       });
 
@@ -399,12 +449,15 @@ describe("INTEGRATION: Reverted with custom error", function () {
           randomPrivateKey,
           this.hre.ethers.provider
         );
+        const matchersFromSenderWithoutFunds = matchers.connect(
+          signer
+        ) as MatchersContract;
 
         // this transaction will fail because of lack of funds, not because of a
         // revert
         await expect(
           expect(
-            matchers.connect(signer).revertsWithoutReason({
+            matchersFromSenderWithoutFunds.revertsWithoutReason({
               gasLimit: 1_000_000,
             })
           ).to.not.be.revertedWithCustomError(matchers, "SomeCustomError")
@@ -412,6 +465,29 @@ describe("INTEGRATION: Reverted with custom error", function () {
           ProviderError,
           "sender doesn't have enough funds to send tx"
         );
+      });
+    });
+
+    describe("stack traces", function () {
+      // smoke test for stack traces
+      it("includes test file", async function () {
+        try {
+          await expect(
+            matchers.revertsWith("some reason")
+          ).to.be.revertedWithCustomError(matchers, "SomeCustomError");
+        } catch (e: any) {
+          const errorString = util.inspect(e);
+          expect(errorString).to.include(
+            "Expected transaction to be reverted with custom error 'SomeCustomError', but it reverted with reason 'some reason'"
+          );
+          expect(errorString).to.include(
+            path.join("test", "reverted", "revertedWithCustomError.ts")
+          );
+
+          return;
+        }
+
+        expect.fail("Expected an exception but none was thrown");
       });
     });
   }

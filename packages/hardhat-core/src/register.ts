@@ -13,9 +13,6 @@ import {
   disableReplWriterShowProxy,
   isNodeCalledWithoutAScript,
 } from "./internal/util/console";
-import { applyWorkaround } from "./internal/util/antlr-prototype-pollution-workaround";
-
-applyWorkaround();
 
 if (!HardhatContext.isCreated()) {
   require("source-map-support/register");
@@ -36,7 +33,7 @@ if (!HardhatContext.isCreated()) {
   }
 
   if (willRunWithTypescript(hardhatArguments.config)) {
-    loadTsNode(hardhatArguments.tsconfig);
+    loadTsNode(hardhatArguments.tsconfig, hardhatArguments.typecheck);
   }
 
   const { resolvedConfig, userConfig } = loadConfigAndTasks(hardhatArguments);
@@ -45,9 +42,10 @@ if (!HardhatContext.isCreated()) {
     resolvedConfig,
     hardhatArguments,
     ctx.tasksDSL.getTaskDefinitions(),
-    ctx.extendersManager.getExtenders(),
+    ctx.environmentExtenders,
     ctx.experimentalHardhatNetworkMessageTraceHooks,
-    userConfig
+    userConfig,
+    ctx.providerExtenders
   );
 
   ctx.setHardhatRuntimeEnvironment(env);

@@ -1,16 +1,16 @@
-import Common from "@ethereumjs/common";
+import { Common } from "@nomicfoundation/ethereumjs-common";
 import {
   AccessListEIP2930Transaction,
   FeeMarketEIP1559Transaction,
   Transaction,
-} from "@ethereumjs/tx";
+} from "@nomicfoundation/ethereumjs-tx";
+import { toBuffer } from "@nomicfoundation/ethereumjs-util";
 import { assert } from "chai";
-import { BN, toBuffer } from "ethereumjs-util";
 
 import {
   bufferToRpcData,
   numberToRpcQuantity,
-  rpcQuantityToBN,
+  rpcQuantityToBigInt,
 } from "../../../../../../src/internal/core/jsonrpc/types/base-types";
 import {
   assertInvalidArgumentsError,
@@ -21,16 +21,31 @@ import {
   DEFAULT_ACCOUNTS,
   DEFAULT_ACCOUNTS_ADDRESSES,
 } from "../../../helpers/providers";
-import { deployContract } from "../../../helpers/transactions";
+import {
+  deployContract,
+  getTxToDeployBytecode,
+  sendDeploymentTx,
+  sendTxToZeroAddress,
+} from "../../../helpers/transactions";
 import { useProvider as importedUseProvider } from "../../../helpers/useProvider";
 import {
   EIP1559RpcTransactionOutput,
   RpcBlockOutput,
 } from "../../../../../../src/internal/hardhat-network/provider/output";
+import { InvalidArgumentsError } from "../../../../../../src/internal/core/providers/errors";
+import * as BigIntUtils from "../../../../../../src/internal/util/bigint";
+import {
+  EXAMPLE_TOUCH_ADDRESS_CONTRACT,
+  EXAMPLE_DIFFICULTY_CONTRACT,
+  EXAMPLE_READ_CONTRACT,
+} from "../../../helpers/contracts";
 
 describe("Eth module - hardfork dependant tests", function () {
-  function useProviderAndCommon(hardfork: string) {
-    importedUseProvider({ hardfork });
+  function useProviderAndCommon(
+    hardfork: string,
+    { allowUnlimitedContractSize } = { allowUnlimitedContractSize: false }
+  ) {
+    importedUseProvider({ hardfork, allowUnlimitedContractSize });
     beforeEach(async function () {
       // TODO: Find out a better way to obtain the common here
 
@@ -93,11 +108,13 @@ describe("Eth module - hardfork dependant tests", function () {
   }
 
   function getEffectiveGasPrice(
-    baseFee: BN,
-    maxFeePerGas: BN,
-    maxPriorityFeePerGas: BN
+    baseFee: bigint,
+    maxFeePerGas: bigint,
+    maxPriorityFeePerGas: bigint
   ) {
-    return BN.min(maxFeePerGas.sub(baseFee), maxPriorityFeePerGas).add(baseFee);
+    return (
+      BigIntUtils.min(maxFeePerGas - baseFee, maxPriorityFeePerGas) + baseFee
+    );
   }
 
   describe("Transaction, call and estimate gas validations", function () {
@@ -666,7 +683,7 @@ describe("Eth module - hardfork dependant tests", function () {
                 await this.provider.send("eth_getTransactionByHash", [txHash]);
 
               const effectiveGasPrice = getEffectiveGasPrice(
-                rpcQuantityToBN(block.baseFeePerGas!),
+                rpcQuantityToBigInt(block.baseFeePerGas!),
                 signedTx.maxFeePerGas,
                 signedTx.maxPriorityFeePerGas
               );
@@ -763,7 +780,7 @@ describe("Eth module - hardfork dependant tests", function () {
           it(`should have an effectiveGasPrice field for EIP-1559 txs when ${hardfork} is activated`, async function () {
             const [sender] = await this.provider.send("eth_accounts");
             const maxFeePerGas = await getPendingBaseFeePerGas(this.provider);
-            const maxPriorityPerGas = maxFeePerGas.divn(2);
+            const maxPriorityPerGas = maxFeePerGas / 2n;
 
             const tx = await this.provider.send("eth_sendTransaction", [
               {
@@ -783,7 +800,7 @@ describe("Eth module - hardfork dependant tests", function () {
               "eth_getBlockByNumber",
               ["latest", false]
             );
-            const baseFee = rpcQuantityToBN(block.baseFeePerGas!);
+            const baseFee = rpcQuantityToBigInt(block.baseFeePerGas!);
 
             const effectiveGasPrice = getEffectiveGasPrice(
               baseFee,
@@ -819,7 +836,7 @@ describe("Eth module - hardfork dependant tests", function () {
               "eth_getBlockByNumber",
               ["latest", false]
             );
-            const baseFee = rpcQuantityToBN(block.baseFeePerGas!);
+            const baseFee = rpcQuantityToBigInt(block.baseFeePerGas!);
 
             const effectiveGasPrice = getEffectiveGasPrice(
               baseFee,
@@ -854,7 +871,7 @@ describe("Eth module - hardfork dependant tests", function () {
               "eth_getBlockByNumber",
               ["latest", false]
             );
-            const baseFee = rpcQuantityToBN(block.baseFeePerGas!);
+            const baseFee = rpcQuantityToBigInt(block.baseFeePerGas!);
 
             const effectiveGasPrice = getEffectiveGasPrice(
               baseFee,
@@ -884,7 +901,7 @@ describe("Eth module - hardfork dependant tests", function () {
           {
             from: DEFAULT_ACCOUNTS_ADDRESSES[0],
             to: impersonated,
-            value: numberToRpcQuantity(new BN("100000000000000000")),
+            value: numberToRpcQuantity(10n ** 17n),
           },
         ]);
         await this.provider.send("hardhat_impersonateAccount", [impersonated]);
@@ -918,7 +935,7 @@ describe("Eth module - hardfork dependant tests", function () {
             {
               from: DEFAULT_ACCOUNTS_ADDRESSES[0],
               to: impersonated,
-              value: numberToRpcQuantity(new BN("100000000000000000")),
+              value: numberToRpcQuantity(10n ** 17n),
             },
           ]);
           await this.provider.send("hardhat_impersonateAccount", [
@@ -1001,7 +1018,7 @@ describe("Eth module - hardfork dependant tests", function () {
     ];
 
     function abiEncodeUint(uint: number) {
-      return new BN(uint).toBuffer("be", 32).toString("hex");
+      return BigIntUtils.toEvmWord(uint);
     }
 
     let contract: string;
@@ -1220,6 +1237,680 @@ describe("Eth module - hardfork dependant tests", function () {
           await this.provider.send("eth_feeHistory", ["0x1", "latest"]);
         });
       }
+    });
+  });
+
+  describe("merge hardfork", function () {
+    describe("pre-merge hardfork", function () {
+      useProviderAndCommon("london");
+
+      it("difficulty and nonce should be non-zero values", async function () {
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        const latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        const difficulty = BigInt(latestBlock.difficulty);
+        const nonce = BigInt(latestBlock.nonce);
+
+        assert.notEqual(difficulty, 0n);
+        assert.notEqual(nonce, 0n);
+      });
+
+      it("mixHash value is always the same", async function () {
+        let latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        assert.equal(
+          latestBlock.mixHash,
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        );
+
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        assert.equal(
+          latestBlock.mixHash,
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        );
+      });
+
+      it("should throw if the 'safe' or 'finalized' block tags are used in eth_getBlockByNumber", async function () {
+        await assertInvalidArgumentsError(
+          this.provider,
+          "eth_getBlockByNumber",
+          ["safe", false],
+          "The 'safe' block tag is not allowed in pre-merge hardforks. You are using the 'london' hardfork."
+        );
+
+        await assertInvalidArgumentsError(
+          this.provider,
+          "eth_getBlockByNumber",
+          ["finalized", false],
+          "The 'finalized' block tag is not allowed in pre-merge hardforks. You are using the 'london' hardfork."
+        );
+      });
+
+      it("should throw if the 'safe' or 'finalized' block tags are used in eth_call", async function () {
+        const contractAddress = await deployContract(
+          this.provider,
+          `0x${EXAMPLE_READ_CONTRACT.bytecode.object}`
+        );
+
+        await assertInvalidArgumentsError(
+          this.provider,
+          "eth_call",
+          [
+            {
+              to: contractAddress,
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              data: `${EXAMPLE_READ_CONTRACT.selectors.blockNumber}`,
+            },
+            "safe",
+          ],
+          "The 'safe' block tag is not allowed in pre-merge hardforks. You are using the 'london' hardfork."
+        );
+
+        await assertInvalidArgumentsError(
+          this.provider,
+          "eth_call",
+          [
+            {
+              to: contractAddress,
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              data: `${EXAMPLE_READ_CONTRACT.selectors.blockNumber}`,
+            },
+            "finalized",
+          ],
+          "The 'finalized' block tag is not allowed in pre-merge hardforks. You are using the 'london' hardfork."
+        );
+      });
+
+      it("should throw if the 'safe' or 'finalized' block tags are used in eth_getLogs", async function () {
+        const fromBlock = await this.provider.send("eth_blockNumber");
+
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        await assertInvalidArgumentsError(
+          this.provider,
+          "eth_getLogs",
+          [
+            {
+              fromBlock,
+              toBlock: "safe",
+            },
+          ],
+          "The 'safe' block tag is not allowed in pre-merge hardforks. You are using the 'london' hardfork."
+        );
+
+        await assertInvalidArgumentsError(
+          this.provider,
+          "eth_getLogs",
+          [
+            {
+              fromBlock,
+              toBlock: "finalized",
+            },
+          ],
+          "The 'finalized' block tag is not allowed in pre-merge hardforks. You are using the 'london' hardfork."
+        );
+      });
+    });
+
+    describe("post-merge hardfork", function () {
+      useProviderAndCommon("merge");
+
+      it("difficulty and nonce should be zero values", async function () {
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        const latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        const difficulty = BigInt(latestBlock.difficulty);
+        const nonce = BigInt(latestBlock.nonce);
+
+        assert.equal(difficulty, 0n);
+        assert.equal(nonce, 0n);
+      });
+
+      it("mixHash value changes from block to block", async function () {
+        let latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        // this value and the next one are hardcoded because the mixHash is
+        // pseudo-randomly generated from a fixed seed
+        assert.equal(
+          latestBlock.mixHash,
+          "0x53c5ae3ce8eefbfad3aca77e5f4e1b19a949b04e2e5ce7a24fbb64422f14f0bf"
+        );
+
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        assert.equal(
+          latestBlock.mixHash,
+          "0xf4fbfa6c8463f342eb58838d8c6b0661faf22e7076a518bf4deaddbf3fa8a112"
+        );
+      });
+
+      it("the mixHash of a pending block is null", async function () {
+        const pendingBlock = await this.provider.send("eth_getBlockByNumber", [
+          "pending",
+          false,
+        ]);
+
+        assert.isNull(pendingBlock.mixHash);
+      });
+
+      it("fetching the pending block shouldn't affect the mixHash", async function () {
+        // fetch pending block before mining
+        await this.provider.send("eth_getBlockByNumber", ["pending", false]);
+
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        // fetch pending block after mining
+        await this.provider.send("eth_getBlockByNumber", ["pending", false]);
+
+        const latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        assert.equal(
+          latestBlock.mixHash,
+          "0xf4fbfa6c8463f342eb58838d8c6b0661faf22e7076a518bf4deaddbf3fa8a112"
+        );
+      });
+
+      it("the DIFFICULTY opcode should match the value returned in the mixHash", async function () {
+        const contractAddress = await deployContract(
+          this.provider,
+          `0x${EXAMPLE_DIFFICULTY_CONTRACT.bytecode.object}`
+        );
+
+        const difficultyHex = await this.provider.send("eth_call", [
+          {
+            to: contractAddress,
+            from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+            data: `${EXAMPLE_DIFFICULTY_CONTRACT.selectors.difficulty}`,
+          },
+        ]);
+
+        const difficulty = BigInt(difficultyHex);
+
+        const latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+
+        const latestBlockMixHash = BigInt(latestBlock.mixHash);
+
+        assert.equal(difficulty, latestBlockMixHash);
+      });
+
+      it("should support the 'safe' and 'finalized' block tags in eth_getBlockByNumber", async function () {
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        const latestBlock = await this.provider.send("eth_getBlockByNumber", [
+          "latest",
+          false,
+        ]);
+        const safeBlock = await this.provider.send("eth_getBlockByNumber", [
+          "safe",
+          false,
+        ]);
+        const finalizedBlock = await this.provider.send(
+          "eth_getBlockByNumber",
+          ["finalized", false]
+        );
+
+        assert.deepEqual(latestBlock, safeBlock);
+        assert.deepEqual(latestBlock, finalizedBlock);
+      });
+
+      it("should support the 'safe' and 'finalized' block tags in eth_call", async function () {
+        const contractAddress = await deployContract(
+          this.provider,
+          `0x${EXAMPLE_READ_CONTRACT.bytecode.object}`
+        );
+
+        await this.provider.send("eth_call", [
+          {
+            to: contractAddress,
+            from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+            data: `${EXAMPLE_READ_CONTRACT.selectors.blockNumber}`,
+          },
+          "safe",
+        ]);
+
+        await this.provider.send("eth_call", [
+          {
+            to: contractAddress,
+            from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+            data: `${EXAMPLE_READ_CONTRACT.selectors.blockNumber}`,
+          },
+          "finalized",
+        ]);
+      });
+
+      it("should support the 'safe' and 'finalized' block tags in eth_getLogs", async function () {
+        const fromBlock = await this.provider.send("eth_blockNumber");
+
+        // send a transaction to generate a new block
+        await sendTxToZeroAddress(this.provider);
+
+        // we just check that it doesn't throw
+        await this.provider.send("eth_getLogs", [
+          {
+            fromBlock,
+            toBlock: "safe",
+          },
+        ]);
+
+        await this.provider.send("eth_getLogs", [
+          {
+            fromBlock,
+            toBlock: "finalized",
+          },
+        ]);
+      });
+    });
+  });
+
+  describe("shanghai hardfork", function () {
+    const maxCodeSize = 24576;
+    const maxInitcodeSize = 2 * maxCodeSize;
+
+    describe("pre-shanghai hardfork", function () {
+      useProviderAndCommon("merge");
+
+      describe("warm COINBASE (EIP-3651)", function () {
+        it("shouldn't be warm", async function () {
+          const contractAddress = await deployContract(
+            this.provider,
+            `0x${EXAMPLE_TOUCH_ADDRESS_CONTRACT.bytecode.object}`
+          );
+
+          const txHash = await this.provider.send("eth_sendTransaction", [
+            {
+              to: contractAddress,
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              data: `${EXAMPLE_TOUCH_ADDRESS_CONTRACT.selectors.touchAddress}000000000000000000000000c014ba5ec014ba5ec014ba5ec014ba5ec014ba5e`,
+            },
+          ]);
+
+          const receipt = await this.provider.send(
+            "eth_getTransactionReceipt",
+            [txHash]
+          );
+
+          const gasUsed = rpcQuantityToBigInt(receipt.gasUsed);
+
+          assert.equal(gasUsed, 24478n);
+        });
+      });
+
+      describe("limit and meter initcode (EIP-3860)", function () {
+        it("shouldn't apply initcode word cost", async function () {
+          const bytecode = EXAMPLE_READ_CONTRACT.bytecode.object;
+
+          const txHash = await this.provider.send("eth_sendTransaction", [
+            {
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              to: null,
+              data: `0x${bytecode}`,
+            },
+          ]);
+
+          const receipt = await this.provider.send(
+            "eth_getTransactionReceipt",
+            [txHash]
+          );
+
+          const gasUsed = rpcQuantityToBigInt(receipt.gasUsed);
+
+          assert.equal(gasUsed, 166849n);
+        });
+
+        it("should allow initcodes larger than the EIP-3860 limit", async function () {
+          const code = "ff".repeat(maxInitcodeSize + 100);
+
+          const tx = getTxToDeployBytecode(code, maxCodeSize);
+
+          await this.provider.send("hardhat_setNextBlockBaseFeePerGas", [
+            "0x0",
+          ]);
+
+          const contractAddress = await sendDeploymentTx(this.provider, tx);
+
+          const deployedCode = await this.provider.send("eth_getCode", [
+            contractAddress,
+            "latest",
+          ]);
+
+          const deployedCodeBytes = (deployedCode.length - 2) / 2;
+          assert.equal(deployedCodeBytes, maxCodeSize);
+        });
+      });
+
+      describe("withdrawal fields in returned blocks", function () {
+        it("shouldn't include withdrawal fields", async function () {
+          const block: RpcBlockOutput = await this.provider.send(
+            "eth_getBlockByNumber",
+            ["latest", false]
+          );
+
+          assert.isUndefined(block.withdrawals);
+          assert.isUndefined(block.withdrawalsRoot);
+        });
+      });
+    });
+
+    describe("post-shanghai hardfork", function () {
+      useProviderAndCommon("shanghai");
+
+      describe("warm COINBASE (EIP-3651)", function () {
+        it("should be warm", async function () {
+          const contractAddress = await deployContract(
+            this.provider,
+            `0x${EXAMPLE_TOUCH_ADDRESS_CONTRACT.bytecode.object}`
+          );
+
+          const txHash = await this.provider.send("eth_sendTransaction", [
+            {
+              to: contractAddress,
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              data: `${EXAMPLE_TOUCH_ADDRESS_CONTRACT.selectors.touchAddress}000000000000000000000000c014ba5ec014ba5ec014ba5ec014ba5ec014ba5e`,
+            },
+          ]);
+
+          const receipt = await this.provider.send(
+            "eth_getTransactionReceipt",
+            [txHash]
+          );
+
+          const gasUsed = rpcQuantityToBigInt(receipt.gasUsed);
+
+          // This is 2500 less than the equivalent test with a pre-shanghai
+          // hardfork.
+          // 2500 is COLD_ACCOUNT_ACCESS_COST - WARM_STORAGE_READ_COST,
+          // see https://eips.ethereum.org/EIPS/eip-2929
+          assert.equal(gasUsed, 21978n);
+        });
+
+        it("other addresses should be cold", async function () {
+          const contractAddress = await deployContract(
+            this.provider,
+            `0x${EXAMPLE_TOUCH_ADDRESS_CONTRACT.bytecode.object}`
+          );
+
+          const txHash = await this.provider.send("eth_sendTransaction", [
+            {
+              to: contractAddress,
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              // we use an address with the same amount of zeros as the coinbase
+              // address
+              data: `${EXAMPLE_TOUCH_ADDRESS_CONTRACT.selectors.touchAddress}000000000000000000000000f0fffffff0fffffff0fffffff0fffffff0ffffff`,
+            },
+          ]);
+
+          const receipt = await this.provider.send(
+            "eth_getTransactionReceipt",
+            [txHash]
+          );
+
+          const gasUsed = rpcQuantityToBigInt(receipt.gasUsed);
+
+          assert.equal(gasUsed, 24478n);
+        });
+      });
+
+      describe("limit and meter initcode (EIP-3860)", function () {
+        describe("without allowUnlimitedContractSize", function () {
+          it("shouldn't allow initcodes larger than the EIP-3860 limit", async function () {
+            const code = "ff".repeat(maxInitcodeSize + 100);
+
+            const tx = getTxToDeployBytecode(code, maxCodeSize);
+
+            await assert.isRejected(
+              sendDeploymentTx(this.provider, tx),
+              InvalidArgumentsError,
+              "Trying to send a deployment transaction whose init code length is"
+            );
+          });
+
+          it("shouldn't allow initcodes larger than the EIP-3860 limit from impersonated accounts", async function () {
+            const code = "ff".repeat(maxInitcodeSize + 100);
+
+            const impersonatedAddress =
+              "0x1234567890123456789012345678901234567890";
+
+            await this.provider.send("hardhat_impersonateAccount", [
+              impersonatedAddress,
+            ]);
+            await this.provider.send("eth_sendTransaction", [
+              {
+                from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+                to: impersonatedAddress,
+                value: numberToRpcQuantity(10n ** 18n),
+              },
+            ]);
+
+            const tx = getTxToDeployBytecode(
+              code,
+              maxCodeSize,
+              impersonatedAddress
+            );
+
+            await assert.isRejected(
+              sendDeploymentTx(this.provider, tx),
+              InvalidArgumentsError,
+              "Trying to send a deployment transaction whose init code length is"
+            );
+          });
+
+          it("shouldn't allow initcodes larger than the EIP-3860 limit in raw transactions", async function () {
+            const code = "ff".repeat(maxInitcodeSize + 100);
+
+            const txData = getTxToDeployBytecode(code, maxCodeSize);
+
+            await this.provider.send("hardhat_setNextBlockBaseFeePerGas", [
+              "0x0",
+            ]);
+
+            const tx = Transaction.fromTxData(
+              {
+                gasLimit: txData.gas,
+                gasPrice: txData.gasPrice,
+                data: txData.data,
+              },
+              {
+                common: this.common,
+                disableMaxInitCodeSizeCheck: true,
+              }
+            );
+
+            const signedTx = tx.sign(privateKey);
+            const serialized = bufferToRpcData(signedTx.serialize());
+
+            await assertInvalidArgumentsError(
+              this.provider,
+              "eth_sendRawTransaction",
+              [serialized],
+              "Trying to send a deployment transaction whose init code length is"
+            );
+          });
+        });
+
+        describe("with allowUnlimitedContractSize", function () {
+          useProviderAndCommon("shanghai", {
+            allowUnlimitedContractSize: true,
+          });
+
+          it("should allow initcodes larger than the EIP-3860 limit", async function () {
+            const code = "ff".repeat(maxInitcodeSize + 100);
+
+            const tx = getTxToDeployBytecode(code, maxCodeSize);
+
+            await this.provider.send("hardhat_setNextBlockBaseFeePerGas", [
+              "0x0",
+            ]);
+
+            const contractAddress = await sendDeploymentTx(this.provider, tx);
+
+            const deployedCode = await this.provider.send("eth_getCode", [
+              contractAddress,
+              "latest",
+            ]);
+
+            const deployedCodeBytes = (deployedCode.length - 2) / 2;
+            assert.equal(deployedCodeBytes, maxCodeSize);
+          });
+
+          it("should allow initcodes larger than the EIP-3860 limit from impersonated accounts", async function () {
+            const code = "ff".repeat(maxInitcodeSize + 100);
+
+            const impersonatedAddress =
+              "0x1234567890123456789012345678901234567890";
+
+            await this.provider.send("hardhat_setNextBlockBaseFeePerGas", [
+              "0x0",
+            ]);
+            await this.provider.send("hardhat_impersonateAccount", [
+              impersonatedAddress,
+            ]);
+
+            // send some eth to the impersonated account
+            await this.provider.send("eth_sendTransaction", [
+              {
+                from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+                to: impersonatedAddress,
+                value: numberToRpcQuantity(10n ** 18n),
+              },
+            ]);
+
+            const tx = getTxToDeployBytecode(
+              code,
+              maxCodeSize,
+              impersonatedAddress
+            );
+
+            const contractAddress = await sendDeploymentTx(this.provider, tx);
+
+            const deployedCode = await this.provider.send("eth_getCode", [
+              contractAddress,
+              "latest",
+            ]);
+
+            const deployedCodeBytes = (deployedCode.length - 2) / 2;
+            assert.equal(deployedCodeBytes, maxCodeSize);
+          });
+
+          it("should allow initcodes larger than the EIP-3860 limit in raw transactions", async function () {
+            const code = "ff".repeat(maxInitcodeSize + 100);
+
+            const txData = getTxToDeployBytecode(code, maxCodeSize);
+
+            await this.provider.send("hardhat_setNextBlockBaseFeePerGas", [
+              "0x0",
+            ]);
+
+            const tx = Transaction.fromTxData(
+              {
+                gasLimit: txData.gas,
+                gasPrice: txData.gasPrice,
+                data: txData.data,
+              },
+              {
+                common: this.common,
+                disableMaxInitCodeSizeCheck: true,
+              }
+            );
+
+            const signedTx = tx.sign(privateKey);
+            const serialized = bufferToRpcData(signedTx.serialize());
+
+            const txHash = await this.provider.send("eth_sendRawTransaction", [
+              serialized,
+            ]);
+
+            const { contractAddress } = await this.provider.send(
+              "eth_getTransactionReceipt",
+              [txHash]
+            );
+
+            const deployedCode = await this.provider.send("eth_getCode", [
+              contractAddress,
+              "latest",
+            ]);
+
+            const deployedCodeBytes = (deployedCode.length - 2) / 2;
+            assert.equal(deployedCodeBytes, maxCodeSize);
+          });
+        });
+
+        it("should apply initcode word cost", async function () {
+          const bytecode = EXAMPLE_READ_CONTRACT.bytecode.object;
+
+          const words = Math.ceil(bytecode.length / 2 / 32);
+          const initcodeWordCost = BigInt(2 * words);
+
+          const txHash = await this.provider.send("eth_sendTransaction", [
+            {
+              from: DEFAULT_ACCOUNTS_ADDRESSES[0],
+              to: null,
+              data: `0x${bytecode}`,
+            },
+          ]);
+
+          const receipt = await this.provider.send(
+            "eth_getTransactionReceipt",
+            [txHash]
+          );
+
+          const gasUsed = rpcQuantityToBigInt(receipt.gasUsed);
+
+          // This is the same value as the test with a pre-shanghai hardfork,
+          // plus the initcode word cost.
+          // See https://eips.ethereum.org/EIPS/eip-3860
+          assert.equal(gasUsed, 166849n + initcodeWordCost);
+        });
+      });
+
+      describe("withdrawal fields in returned blocks", function () {
+        it("should include withdrawal fields", async function () {
+          const block: RpcBlockOutput = await this.provider.send(
+            "eth_getBlockByNumber",
+            ["latest", false]
+          );
+
+          assert.isDefined(block.withdrawals);
+          assert.isDefined(block.withdrawalsRoot);
+        });
+      });
     });
   });
 });

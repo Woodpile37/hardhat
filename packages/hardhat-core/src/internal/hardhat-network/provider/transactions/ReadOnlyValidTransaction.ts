@@ -1,6 +1,6 @@
-import Common from "@ethereumjs/common";
-import { Transaction, TxData, TxOptions } from "@ethereumjs/tx";
-import { Address } from "ethereumjs-util";
+import { Common } from "@nomicfoundation/ethereumjs-common";
+import { Transaction, TxData, TxOptions } from "@nomicfoundation/ethereumjs-tx";
+import { Address } from "@nomicfoundation/ethereumjs-util";
 
 import { InternalError } from "../../../core/providers/errors";
 
@@ -56,7 +56,7 @@ export class ReadOnlyValidTransaction extends Transaction {
   private readonly _sender: Address;
 
   constructor(sender: Address, data: TxData = {}) {
-    super(data, { freeze: false });
+    super(data, { freeze: false, disableMaxInitCodeSizeCheck: true });
 
     this.common = this._getCommon();
     this._sender = sender;

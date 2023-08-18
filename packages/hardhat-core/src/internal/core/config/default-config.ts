@@ -1,5 +1,3 @@
-import { BN } from "ethereumjs-util";
-
 import { HardhatNetworkConfig } from "../../../types";
 import { HardforkName } from "../../util/hardforks";
 import { HARDHAT_NETWORK_NAME } from "../../constants";
@@ -38,7 +36,7 @@ export const defaultHardhatNetworkParams: Omit<
   HardhatNetworkConfig,
   "gas" | "initialDate"
 > = {
-  hardfork: "arrowGlacier",
+  hardfork: HardforkName.SHANGHAI,
   blockGasLimit: 30_000_000,
   gasPrice: HARDHAT_NETWORK_DEFAULT_GAS_PRICE,
   chainId: 31337,
@@ -55,20 +53,29 @@ export const defaultHardhatNetworkParams: Omit<
   accounts: defaultHardhatNetworkHdAccountsConfigParams,
   loggingEnabled: false,
   gasMultiplier: DEFAULT_GAS_MULTIPLIER,
-  minGasPrice: new BN(0),
+  minGasPrice: 0n,
   chains: new Map([
     [
       // block numbers below were taken from https://github.com/ethereumjs/ethereumjs-monorepo/tree/master/packages/common/src/chains
       1, // mainnet
       {
         hardforkHistory: new Map([
-          [HardforkName.BYZANTIUM, 4370000],
-          [HardforkName.CONSTANTINOPLE, 7280000],
-          [HardforkName.PETERSBURG, 7280000],
-          [HardforkName.ISTANBUL, 9069000],
-          [HardforkName.MUIR_GLACIER, 9200000],
-          [HardforkName.BERLIN, 12244000],
-          [HardforkName.LONDON, 12965000],
+          [HardforkName.FRONTIER, 0],
+          [HardforkName.HOMESTEAD, 1_150_000],
+          [HardforkName.DAO, 1_920_000],
+          [HardforkName.TANGERINE_WHISTLE, 2_463_000],
+          [HardforkName.SPURIOUS_DRAGON, 2_675_000],
+          [HardforkName.BYZANTIUM, 4_370_000],
+          [HardforkName.CONSTANTINOPLE, 7_280_000],
+          [HardforkName.PETERSBURG, 7_280_000],
+          [HardforkName.ISTANBUL, 9_069_000],
+          [HardforkName.MUIR_GLACIER, 9_200_000],
+          [HardforkName.BERLIN, 1_2244_000],
+          [HardforkName.LONDON, 12_965_000],
+          [HardforkName.ARROW_GLACIER, 13_773_000],
+          [HardforkName.GRAY_GLACIER, 15_050_000],
+          [HardforkName.MERGE, 15_537_394],
+          [HardforkName.SHANGHAI, 17_034_870],
         ]),
       },
     ],
@@ -96,6 +103,16 @@ export const defaultHardhatNetworkParams: Omit<
           [HardforkName.ISTANBUL, 5435345],
           [HardforkName.BERLIN, 8290928],
           [HardforkName.LONDON, 8897988],
+        ]),
+      },
+    ],
+    [
+      5, // goerli
+      {
+        hardforkHistory: new Map([
+          [HardforkName.ISTANBUL, 1561651],
+          [HardforkName.BERLIN, 4460644],
+          [HardforkName.LONDON, 5062605],
         ]),
       },
     ],
