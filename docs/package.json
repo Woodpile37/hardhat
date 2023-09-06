@@ -39,7 +39,7 @@
   "devDependencies": {
     "@babel/core": "^7.17.5",
     "@babel/preset-env": "^7.16.11",
-    "@next/bundle-analyzer": "^12.1.5",
+    "@next/bundle-analyzer": "^13.4.13",
     "@react-theming/storybook-addon": "^1.1.5",
     "@storybook/addon-actions": "^6.4.19",
     "@storybook/addon-essentials": "^7.2.2",
