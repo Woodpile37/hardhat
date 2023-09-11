@@ -62,7 +62,7 @@
     "eslint-config-prettier": "^8.5.0",
     "eslint-plugin-prettier": "^4.0.0",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-storybook": "^0.5.7",
+    "eslint-plugin-storybook": "^0.6.13",
     "js-yaml": "^4.1.0",
     "next-compose-plugins": "^2.2.1",
     "next-remote-watch": "^1.0.0",
